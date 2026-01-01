@@ -1,0 +1,68 @@
+name: Node.js Azure Deployment with App Insights
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - run: npm install
+
+      - run: npm run build || echo "No build step"
+
+      - name: Set deployment variables
+        run: |
+          echo "RESOURCE_GROUP=my-node-rg" >> $GITHUB_ENV
+          echo "WEBAPP_NAME=my-node-app" >> $GITHUB_ENV
+          echo "LOCATION=eastus" >> $GITHUB_ENV
+
+      - name: Create Resource Group
+        run: |
+          if ! az group show --name $RESOURCE_GROUP &>/dev/null; then
+            az group create --name $RESOURCE_GROUP --location $LOCATION
+          fi
+
+      - name: Create Application Insights
+        run: |
+          if ! az monitor app-insights component show \
+              --app $WEBAPP_NAME-ai --resource-group $RESOURCE_GROUP &>/dev/null; then
+            az monitor app-insights component create \
+              --app $WEBAPP_NAME-ai \
+              --location $LOCATION \
+              --resource-group $RESOURCE_GROUP \
+              --application-type web
+          fi
+
+      - name: Create Web App
+        run: |
+          if ! az webapp show --name $WEBAPP_NAME --resource-group $RESOURCE_GROUP &>/dev/null; then
+            az webapp create \
+              --resource-group $RESOURCE_GROUP \
+              --plan $WEBAPP_NAME-plan \
+              --name $WEBAPP_NAME \
+              --runtime "NODE|18-lts" \
+              --deployment-local-git
+          fi
+
+      - name: Deploy Node.js app
+        run: |
+          az webapp up \
+            --name $WEBAPP_NAME \
+            --resource-group $RESOURCE_GROUP \
+            --runtime "NODE|18-lts" \
+            --location $LOCATION
